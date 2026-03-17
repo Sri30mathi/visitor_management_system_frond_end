@@ -464,3 +464,88 @@ class QrCodeResponse {
         qrImageBase64: (j['qrImageBase64'] as String).replaceAll(RegExp(r'\s+'), ''),
       );
 }
+
+// ── Active visit check (returning visitor) ─────────────────
+class ActiveVisitResponse {
+  final String   entryId;
+  final String   visitorName;
+  final String   mobile;
+  final String?  company;
+  final String   purpose;
+  final String   hostName;
+  final String   hostDepartment;
+  final String   status;
+  final DateTime visitDateTime;
+  final DateTime? checkInTime;
+  final String?  qrToken;
+  final int      totalVisits;
+
+  ActiveVisitResponse({
+    required this.entryId,
+    required this.visitorName,
+    required this.mobile,
+    this.company,
+    required this.purpose,
+    required this.hostName,
+    required this.hostDepartment,
+    required this.status,
+    required this.visitDateTime,
+    this.checkInTime,
+    this.qrToken,
+    required this.totalVisits,
+  });
+
+  factory ActiveVisitResponse.fromJson(Map<String, dynamic> j) =>
+      ActiveVisitResponse(
+        entryId:        j['entryId'],
+        visitorName:    j['visitorName'],
+        mobile:         j['mobile'],
+        company:        j['company'],
+        purpose:        j['purpose'],
+        hostName:       j['hostName'],
+        hostDepartment: j['hostDepartment'],
+        status:         j['status'],
+        visitDateTime:  _parseUtc(j['visitDateTime']),
+        checkInTime:    _parseUtcNullable(j['checkInTime']),
+        qrToken:        j['qrToken'],
+        totalVisits:    j['totalVisits'] ?? 1,
+      );
+}
+
+// ── Visit history item ──────────────────────────────────────
+class VisitHistoryItem {
+  final String   entryId;
+  final String   purpose;
+  final String   hostName;
+  final String   hostDepartment;
+  final String   status;
+  final DateTime visitDateTime;
+  final DateTime? checkInTime;
+  final DateTime? checkOutTime;
+  final int?     durationMinutes;
+
+  VisitHistoryItem({
+    required this.entryId,
+    required this.purpose,
+    required this.hostName,
+    required this.hostDepartment,
+    required this.status,
+    required this.visitDateTime,
+    this.checkInTime,
+    this.checkOutTime,
+    this.durationMinutes,
+  });
+
+  factory VisitHistoryItem.fromJson(Map<String, dynamic> j) =>
+      VisitHistoryItem(
+        entryId:         j['entryId'],
+        purpose:         j['purpose'],
+        hostName:        j['hostName'],
+        hostDepartment:  j['hostDepartment'],
+        status:          j['status'],
+        visitDateTime:   _parseUtc(j['visitDateTime']),
+        checkInTime:     _parseUtcNullable(j['checkInTime']),
+        checkOutTime:    _parseUtcNullable(j['checkOutTime']),
+        durationMinutes: j['durationMinutes'],
+      );
+}

@@ -11,6 +11,7 @@ import 'screens/visitors/visitor_detail_screen.dart';
 import 'screens/hosts/host_list_screen.dart';
 import 'screens/hosts/host_form_screen.dart';
 import 'screens/qr/qr_scanner_screen.dart';
+import 'screens/qr/registration_qr_screen.dart';
 import 'utils/app_theme.dart';
 
 void main() {
@@ -40,6 +41,7 @@ class App extends StatelessWidget {
         '/hosts':        (_) => const HostListScreen(),
         '/hosts/new':    (_) => const HostFormScreen(),
         '/qr-scan':      (_) => const QrScannerScreen(),
+        '/register-qr':  (_) => const RegistrationQrScreen(),
       },
       onGenerateRoute: (s) {
         if (s.name == '/visitors/detail') return MaterialPageRoute(
@@ -144,7 +146,7 @@ class _OfflineScreenState extends State<_OfflineScreen> {
               Container(
                 width: 80, height: 80,
                 decoration: BoxDecoration(
-                  color: AppTheme.statusError.withOpacity(0.08),
+                  color: AppTheme.statusError.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: const Icon(Icons.cloud_off_rounded,

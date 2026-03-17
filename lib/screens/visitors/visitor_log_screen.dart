@@ -69,7 +69,7 @@ class _State extends State<VisitorLogScreen> {
     final mfmt  = DateFormat('MMMM yyyy');
     final sfmt  = DateFormat('dd MMM');
     switch (_mode) {
-      case _Mode.all:           return 'All Time';
+      case _Mode.all:           return 'All';
       case _Mode.today:         return 'Today';
       case _Mode.specificDay:
         return _pickedDay != null ? dfmt.format(_pickedDay!) : 'Pick a Day';
@@ -134,40 +134,11 @@ class _State extends State<VisitorLogScreen> {
   );
 
   // ── Date filter dropdown ──────────────────────────────────
-  void _showFilterMenu() async {
+  // Called when a filter option is selected from the dropdown
+  Future<void> _onFilterSelected(_Mode mode) async {
     final now = DateTime.now();
 
-    // Returns: _Mode | _QuickDayResult | _QuickMonthResult
-    final choice = await showModalBottomSheet<dynamic>(
-      context: context,
-      backgroundColor: AppTheme.surface,
-      isScrollControlled: true,
-      useSafeArea: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => _FilterSheet(current: _mode),
-    );
-
-    if (choice == null || !mounted) return;
-
-    // Quick day tap
-    if (choice is _QuickDayResult) {
-      setState(() { _mode = _Mode.specificDay; _pickedDay = choice.date; });
-      _load(reset: true);
-      return;
-    }
-
-    // Quick month tap
-    if (choice is _QuickMonthResult) {
-      setState(() { _mode = _Mode.specificMonth; _pickedMonth = choice.month; });
-      _load(reset: true);
-      return;
-    }
-
-    final modePick = choice as _Mode;
-
-    if (modePick == _Mode.specificDay) {
-      // Day picker
+    if (mode == _Mode.specificDay) {
       final picked = await showDatePicker(
         context: context,
         initialDate: _pickedDay ?? now,
@@ -181,27 +152,20 @@ class _State extends State<VisitorLogScreen> {
       );
       if (picked == null || !mounted) return;
       setState(() { _mode = _Mode.specificDay; _pickedDay = picked; });
-      _load(reset: true);
-      return;
-    }
-
-    if (modePick == _Mode.specificMonth) {
-      // Month picker dialog
-      final picked = await _showMonthPicker(context, _pickedMonth ?? now);
+    } else if (mode == _Mode.specificMonth) {
+      final picked = await showDialog<DateTime>(
+        context: context,
+        builder: (_) => _MonthPickerDialog(initial: _pickedMonth ?? now),
+      );
       if (picked == null || !mounted) return;
       setState(() { _mode = _Mode.specificMonth; _pickedMonth = picked; });
-      _load(reset: true);
-      return;
-    }
-
-    if (modePick == _Mode.customRange) {
+    } else if (mode == _Mode.customRange) {
       final picked = await showDateRangePicker(
         context: context,
         firstDate: DateTime(now.year - 3),
         lastDate: now,
         initialDateRange: _customRange ??
-            DateTimeRange(
-                start: now.subtract(const Duration(days: 7)), end: now),
+            DateTimeRange(start: now.subtract(const Duration(days: 7)), end: now),
         builder: (ctx, child) => Theme(
           data: Theme.of(ctx).copyWith(
               colorScheme: const ColorScheme.light(primary: AppTheme.primary)),
@@ -210,22 +174,13 @@ class _State extends State<VisitorLogScreen> {
       );
       if (picked == null || !mounted) return;
       setState(() { _mode = _Mode.customRange; _customRange = picked; });
-      _load(reset: true);
-      return;
+    } else {
+      setState(() => _mode = mode);
     }
-
-    // Simple modes (all / today)
-    setState(() => _mode = modePick);
     _load(reset: true);
   }
 
-  // Month picker — scroll through year/month grid
-  Future<DateTime?> _showMonthPicker(BuildContext ctx, DateTime initial) {
-    return showDialog<DateTime>(
-      context: ctx,
-      builder: (_) => _MonthPickerDialog(initial: initial),
-    );
-  }
+
 
   // ── Check-in / out ────────────────────────────────────────
   Future<void> _checkIn(VisitorEntryDto v) async {
@@ -331,12 +286,12 @@ class _State extends State<VisitorLogScreen> {
 
             // ── Date filter + Status row ────────────────────
             Row(children: [
-              // Date filter — real dropdown with labelled options
+              // Date filter — inline dropdown
               Expanded(
                 child: _DateFilterDropdown(
                   mode: _mode,
                   label: _dropdownLabel,
-                  onTap: _showFilterMenu,
+                  onSelected: _onFilterSelected,
                 ),
               ),
               const SizedBox(width: 10),
@@ -369,7 +324,7 @@ class _State extends State<VisitorLogScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
-                    color: AppTheme.statusColor(_status).withOpacity(0.1),
+                    color: AppTheme.statusColor(_status).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(_statusLabel(_status),
@@ -451,8 +406,13 @@ class _State extends State<VisitorLogScreen> {
 class _DateFilterDropdown extends StatelessWidget {
   final _Mode mode;
   final String label;
-  final VoidCallback onTap;
-  const _DateFilterDropdown({required this.mode, required this.label, required this.onTap});
+  final void Function(_Mode) onSelected;
+
+  const _DateFilterDropdown({
+    required this.mode,
+    required this.label,
+    required this.onSelected,
+  });
 
   static const _modeColors = {
     _Mode.all:           Color(0xFF6366F1),
@@ -470,258 +430,83 @@ class _DateFilterDropdown extends StatelessWidget {
     _Mode.customRange:   Icons.date_range_rounded,
   };
 
-  static const _modeShortLabels = {
-    _Mode.all:           'All Time',
+  static const _modeLabels = {
+    _Mode.all:           'All',
     _Mode.today:         'Today',
-    _Mode.specificDay:   'Specific Day',
-    _Mode.specificMonth: 'This Month',
-    _Mode.customRange:   'Date Range',
+    _Mode.specificDay:   'Pick Any Day',
+    _Mode.specificMonth: 'Pick Any Month',
+    _Mode.customRange:   'Custom Range',
   };
 
   @override
   Widget build(BuildContext context) {
-    final color = _modeColors[mode] ?? AppTheme.primary;
-    final icon  = _modeIcons[mode]  ?? Icons.calendar_today_rounded;
-    final hint  = _modeShortLabels[mode] ?? 'Filter';
-    final showSub = label != hint && label != 'Pick a Day' && label != 'Pick a Month'
-        && label != 'Custom Range' && label != 'All Time' && label != 'Today';
+    final now      = DateTime.now();
+    final color    = _modeColors[mode] ?? AppTheme.primary;
+    final icon     = _modeIcons[mode]  ?? Icons.calendar_today_rounded;
+    final showSub  = label != (_modeLabels[mode] ?? '') &&
+                     label != 'All' && label != 'Today';
 
-    return Material(
-      color: color.withOpacity(0.07),
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        splashColor: color.withOpacity(0.15),
-        highlightColor: color.withOpacity(0.08),
-        child: Container(
-          height: 40,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: color.withOpacity(0.35)),
-          ),
-          child: Row(children: [
-            Icon(icon, size: 15, color: color),
-            const SizedBox(width: 8),
-            Expanded(
-              child: showSub
-                  ? Column(mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(hint, style: TextStyle(fontSize: 10,
-                          color: color.withOpacity(0.7), fontWeight: FontWeight.w500,
-                          height: 1.1)),
-                      Text(label, style: TextStyle(fontSize: 12,
-                          fontWeight: FontWeight.w700, color: color, height: 1.2),
-                          overflow: TextOverflow.ellipsis),
-                    ])
-                  : Text(label, style: TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w600, color: color),
-                      overflow: TextOverflow.ellipsis),
-            ),
-            Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: color),
-          ]),
+    return PopupMenuButton<dynamic>(
+      offset: const Offset(0, 44),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white,
+      elevation: 4,
+      onSelected: (val) => onSelected(val as _Mode),
+      itemBuilder: (_) => [
+        ...(_modeLabels.entries.map((e) {
+          final sel = mode == e.key;
+          final c   = _modeColors[e.key] ?? AppTheme.primary;
+          final ic  = _modeIcons[e.key]  ?? Icons.calendar_today_rounded;
+          return PopupMenuItem<dynamic>(
+            value: e.key,
+            height: 42,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(children: [
+              Icon(ic, size: 15, color: sel ? c : AppTheme.textMuted),
+              const SizedBox(width: 10),
+              Expanded(child: Text(e.value, style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600,
+                  color: sel ? c : AppTheme.textPrimary))),
+              if (sel) Icon(Icons.check_rounded, size: 14, color: c),
+            ]),
+          );
+        })),
+      ],
+      // The trigger button
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
         ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────
-//  FILTER BOTTOM SHEET
-// ─────────────────────────────────────────────────────────
-class _FilterSheet extends StatelessWidget {
-  final _Mode current;
-  const _FilterSheet({required this.current});
-
-  @override
-  Widget build(BuildContext context) {
-    final now = DateTime.now();
-
-    // Quick-access recent days (last 7 days)
-    final recentDays = List.generate(7, (i) {
-      final d = now.subtract(Duration(days: i));
-      return d;
-    });
-
-    // Quick-access recent months (last 6 months)
-    final recentMonths = List.generate(6, (i) {
-      var m = now.month - i;
-      var y = now.year;
-      while (m <= 0) { m += 12; y--; }
-      return DateTime(y, m, 1);
-    });
-
-    final options = [
-      (_Mode.all,           Icons.all_inclusive_rounded,  'All Time',
-          'Every visitor ever registered',    const Color(0xFF6366F1)),
-      (_Mode.today,         Icons.today_rounded,           'Today',
-          "Only today's visitors",            AppTheme.primary),
-      (_Mode.specificDay,   Icons.event_rounded,           'Pick Any Day',
-          'Open calendar to choose date',      const Color(0xFF0891B2)),
-      (_Mode.specificMonth, Icons.calendar_month_rounded,  'Pick Any Month',
-          'Open month picker',                 const Color(0xFF7C3AED)),
-      (_Mode.customRange,   Icons.date_range_rounded,      'Custom Range',
-          'Choose a start and end date',       const Color(0xFFD97706)),
-    ];
-
-    final dayFmt   = DateFormat('EEE, d MMM');
-    final monthFmt = DateFormat('MMMM yyyy');
-    final shortMon = DateFormat('MMM yy');
-
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-        child: Column(mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Handle
-          Center(child: Container(width: 40, height: 4,
-              decoration: BoxDecoration(color: AppTheme.border,
-                  borderRadius: BorderRadius.circular(2)))),
-          const SizedBox(height: 16),
-          const Center(child: Text('Filter by Date', style: TextStyle(
-              fontSize: 16, fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary))),
-          const SizedBox(height: 20),
-
-          // ── Quick Day chips ─────────────────────────────
-          const Text('Quick — Day', style: TextStyle(
-              fontSize: 11, fontWeight: FontWeight.w700,
-              color: AppTheme.textMuted, letterSpacing: 0.5)),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: recentDays.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final d   = recentDays[i];
-                final lbl = i == 0 ? 'Today' : i == 1 ? 'Yesterday'
-                    : dayFmt.format(d);
-                return Material(
-                  color: const Color(0xFF0891B2).withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(20),
-                  child: InkWell(
-                    onTap: () => Navigator.pop(context, _QuickDayResult(d)),
-                    borderRadius: BorderRadius.circular(20),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: const Color(0xFF0891B2).withOpacity(0.35)),
-                      ),
-                      child: Text(lbl, style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600,
-                          color: Color(0xFF0891B2))),
-                    ),
-                  ),
-                );
-              },
-            ),
+        child: Row(children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: showSub
+                ? Column(mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(_modeLabels[mode] ?? '', style: TextStyle(
+                        fontSize: 10, color: color.withValues(alpha: 0.7),
+                        fontWeight: FontWeight.w500, height: 1.1)),
+                    Text(label, style: TextStyle(fontSize: 12,
+                        fontWeight: FontWeight.w700, color: color, height: 1.2),
+                        overflow: TextOverflow.ellipsis),
+                  ])
+                : Text(label, style: TextStyle(fontSize: 13,
+                    fontWeight: FontWeight.w600, color: color),
+                    overflow: TextOverflow.ellipsis),
           ),
-          const SizedBox(height: 16),
-
-          // ── Quick Month chips ───────────────────────────
-          const Text('Quick — Month', style: TextStyle(
-              fontSize: 11, fontWeight: FontWeight.w700,
-              color: AppTheme.textMuted, letterSpacing: 0.5)),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: recentMonths.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final m   = recentMonths[i];
-                final lbl = i == 0 ? 'This Month' : shortMon.format(m);
-                return Material(
-                  color: const Color(0xFF7C3AED).withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(20),
-                  child: InkWell(
-                    onTap: () => Navigator.pop(context, _QuickMonthResult(m)),
-                    borderRadius: BorderRadius.circular(20),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: const Color(0xFF7C3AED).withOpacity(0.35)),
-                      ),
-                      child: Text(lbl, style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600,
-                          color: Color(0xFF7C3AED))),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // ── Full options ────────────────────────────────
-          const Text('More Options', style: TextStyle(
-              fontSize: 11, fontWeight: FontWeight.w700,
-              color: AppTheme.textMuted, letterSpacing: 0.5)),
-          const SizedBox(height: 8),
-          ...options.map((o) {
-            final (mode, icon, title, subtitle, color) = o;
-            final sel = current == mode;
-            return Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                onTap: () => Navigator.pop(context, mode),
-                borderRadius: BorderRadius.circular(14),
-                child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: sel ? color.withOpacity(0.07) : AppTheme.background,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                      color: sel ? color : AppTheme.border,
-                      width: sel ? 1.5 : 1),
-                ),
-                child: Row(children: [
-                  Container(
-                    width: 36, height: 36,
-                    decoration: BoxDecoration(
-                      color: sel
-                          ? color.withOpacity(0.12)
-                          : AppTheme.border.withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(icon, size: 17,
-                        color: sel ? color : AppTheme.textMuted),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(title, style: TextStyle(fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: sel ? color : AppTheme.textPrimary)),
-                    Text(subtitle, style: const TextStyle(
-                        fontSize: 11, color: AppTheme.textMuted)),
-                  ])),
-                  if (sel)
-                    Icon(Icons.check_circle_rounded, color: color, size: 18),
-                ]),
-              ),
-            ));
-          }),
+          Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: color),
         ]),
       ),
     );
   }
 }
 
-// Wrapper classes so bottom sheet can return quick picks
-class _QuickDayResult   { final DateTime date;  const _QuickDayResult(this.date); }
-class _QuickMonthResult { final DateTime month; const _QuickMonthResult(this.month); }
+
 
 // ─────────────────────────────────────────────────────────
 //  MONTH PICKER DIALOG
@@ -758,125 +543,115 @@ class _MonthPickerState extends State<_MonthPickerDialog> {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Select Month', style: TextStyle(
-              fontSize: 16, fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary)),
-          const SizedBox(height: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      // Fixed width — same compact footprint as the Flutter date picker
+      insetPadding: EdgeInsets.zero,
+      child: SizedBox(
+        width: 320,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
 
-          // Year selector
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          // ── Year row ────────────────────────────────────
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
             IconButton(
-              icon: const Icon(Icons.chevron_left_rounded),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              icon: const Icon(Icons.chevron_left_rounded, size: 18),
               onPressed: _year > now.year - 3
                   ? () => setState(() => _year--)
                   : null,
               color: AppTheme.primary,
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(20),
-              ),
+            GestureDetector(
               child: Text('$_year', style: const TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.w700,
+                  fontSize: 14, fontWeight: FontWeight.w700,
                   color: AppTheme.primary)),
             ),
             IconButton(
-              icon: const Icon(Icons.chevron_right_rounded),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              icon: const Icon(Icons.chevron_right_rounded, size: 18),
               onPressed: _year < now.year
                   ? () => setState(() => _year++)
                   : null,
               color: AppTheme.primary,
             ),
           ]),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
 
-          // Month grid — fixed row height, no overflow
-          ...List.generate(3, (row) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: List.generate(4, (col) {
-                  final i    = row * 4 + col;
-                  final m    = i + 1;
-                  final sel  = m == _month;
-                  final grey = _isFuture(_year, m);
-                  return Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(left: col == 0 ? 0 : 8),
-                      child: SizedBox(
-                        height: 40,
-                        child: Material(
-                          color: sel
-                              ? AppTheme.primary
-                              : grey
-                                  ? AppTheme.border.withOpacity(0.5)
-                                  : AppTheme.background,
-                          borderRadius: BorderRadius.circular(10),
-                          child: InkWell(
-                            onTap: grey ? null : () => setState(() => _month = m),
-                            borderRadius: BorderRadius.circular(10),
-                            splashColor: AppTheme.primary.withOpacity(0.2),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                    color: sel
-                                        ? AppTheme.primary
-                                        : AppTheme.border),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(_months[i],
-                                  style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: sel
-                                          ? Colors.white
-                                          : grey
-                                              ? AppTheme.textMuted
-                                              : AppTheme.textPrimary)),
-                            ),
+          // ── Month grid — 3 rows × 4 cols ─────────────────
+          ...List.generate(3, (row) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              children: List.generate(4, (col) {
+                final i    = row * 4 + col;
+                final m    = i + 1;
+                final sel  = m == _month;
+                final grey = _isFuture(_year, m);
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(left: col == 0 ? 0 : 5),
+                    child: GestureDetector(
+                      onTap: grey ? null : () => setState(() => _month = m),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 120),
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: sel ? AppTheme.primary : Colors.transparent,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: sel
+                                ? AppTheme.primary
+                                : grey
+                                    ? AppTheme.border.withValues(alpha: 0.3)
+                                    : AppTheme.border,
                           ),
                         ),
+                        alignment: Alignment.center,
+                        child: Text(_months[i], style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                          color: sel
+                              ? Colors.white
+                              : grey
+                                  ? AppTheme.textMuted
+                                  : AppTheme.textPrimary,
+                        )),
                       ),
                     ),
-                  );
-                }),
-              ),
-            );
-          }),
-          const SizedBox(height: 16),
+                  ),
+                );
+              }),
+            ),
+          )),
+          const SizedBox(height: 12),
 
-          Row(children: [
-            Expanded(child: OutlinedButton(
+          // ── Actions ──────────────────────────────────────
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            TextButton(
               onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12))),
-              child: const Text('Cancel'),
-            )),
-            const SizedBox(width: 10),
-            Expanded(child: FilledButton(
+              style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  foregroundColor: AppTheme.textMuted),
+              child: const Text('Cancel', style: TextStyle(fontSize: 13)),
+            ),
+            const SizedBox(width: 4),
+            TextButton(
               onPressed: _isFuture(_year, _month)
                   ? null
                   : () => Navigator.pop(context, DateTime(_year, _month, 1)),
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text('Apply'),
-            )),
+              style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  foregroundColor: AppTheme.primary),
+              child: const Text('OK',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+            ),
           ]),
         ]),
       ),
-    );
+    ),
+  );
   }
 }
 
@@ -965,7 +740,7 @@ class _VRow extends StatelessWidget {
           child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             Container(width: 46, height: 46,
                 decoration: BoxDecoration(
-                    color: c.withOpacity(0.1),
+                    color: c.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12)),
                 child: Center(child: Text(v.visitorName[0].toUpperCase(),
                     style: TextStyle(color: c, fontSize: 18,
@@ -1042,9 +817,9 @@ class _ActionChip extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 16, color: color),

@@ -16,10 +16,14 @@ class VisitorDetailScreen extends StatefulWidget {
 
 class _State extends State<VisitorDetailScreen> {
   VisitorEntryDetailDto? _e;
-  String? _qrBase64;          // base64 PNG from API
+  String? _qrBase64;
   bool _loading    = true;
   bool _qrLoading  = false;
   String? _error;
+
+  // Visit history
+  List<VisitHistoryItem> _history     = [];
+  bool                   _historyLoading = false;
 
   @override
   void initState() { super.initState(); _load(); }
@@ -31,11 +35,21 @@ class _State extends State<VisitorDetailScreen> {
       if (!mounted) return;
       setState(() { _e = e; _loading = false; });
       // Auto-fetch QR for active visitors
-      if (e.status == 'Registered' || e.status == 'CheckedIn') {
-        _fetchQr();
-      }
+      if (e.status == 'Registered' || e.status == 'CheckedIn') _fetchQr();
+      // Load visit history in background
+      _loadHistory(e.mobile ?? '');
     } on ApiException catch (e) {
       if (mounted) setState(() { _error = e.message; _loading = false; });
+    }
+  }
+
+  Future<void> _loadHistory(String mobile) async {
+    setState(() => _historyLoading = true);
+    try {
+      final h = await ApiService.getVisitHistory(mobile);
+      if (mounted) setState(() { _history = h; _historyLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _historyLoading = false);
     }
   }
 
@@ -137,7 +151,7 @@ class _State extends State<VisitorDetailScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.07),
+                color: AppTheme.primary.withValues(alpha: 0.07),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -208,6 +222,9 @@ class _State extends State<VisitorDetailScreen> {
                   qrBase64: _qrBase64,
                   qrLoading: _qrLoading,
                   onShowQr: _showQrDialog,
+                  history: _history,
+                  historyLoading: _historyLoading,
+                  currentEntryId: widget.entryId,
                 ),
       bottomNavigationBar: _actionBar(r),
     );
@@ -215,12 +232,16 @@ class _State extends State<VisitorDetailScreen> {
 
   Widget? _actionBar(Responsive r) {
     if (_e == null) return null;
-    if (_e!.status == 'Registered') return _ActionBar(
-        label: 'Check In', icon: Icons.how_to_reg_rounded,
-        color: AppTheme.statusIn, r: r, onTap: _checkIn);
-    if (_e!.status == 'CheckedIn') return _ActionBar(
-        label: 'Check Out', icon: Icons.logout_rounded,
-        color: AppTheme.statusWait, r: r, onTap: _checkOut);
+    if (_e!.status == 'Registered') {
+      return _ActionBar(
+          label: 'Check In', icon: Icons.how_to_reg_rounded,
+          color: AppTheme.statusIn, r: r, onTap: _checkIn);
+    }
+    if (_e!.status == 'CheckedIn') {
+      return _ActionBar(
+          label: 'Check Out', icon: Icons.logout_rounded,
+          color: AppTheme.statusWait, r: r, onTap: _checkOut);
+    }
     return null;
   }
 }
@@ -234,8 +255,13 @@ class _Body extends StatelessWidget {
   final String? qrBase64;
   final bool qrLoading;
   final VoidCallback onShowQr;
+  final List<VisitHistoryItem> history;
+  final bool historyLoading;
+  final String currentEntryId;
   const _Body({required this.e, required this.r,
-      this.qrBase64, required this.qrLoading, required this.onShowQr});
+      this.qrBase64, required this.qrLoading, required this.onShowQr,
+      required this.history, required this.historyLoading,
+      required this.currentEntryId});
 
   @override
   Widget build(BuildContext context) {
@@ -300,7 +326,7 @@ class _Body extends StatelessWidget {
           return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Column(children: [
               Container(width: 32, height: 32,
-                  decoration: BoxDecoration(color: c.withOpacity(0.1), shape: BoxShape.circle),
+                  decoration: BoxDecoration(color: c.withValues(alpha: 0.1), shape: BoxShape.circle),
                   child: Icon(_evIcon(ev.eventType), size: 15, color: c)),
               if (!last) Container(width: 2, height: 28, color: AppTheme.border),
             ]),
@@ -321,6 +347,118 @@ class _Body extends StatelessWidget {
       ]),
     );
 
+    // ── Visit History ──────────────────────────────────────────
+    // Build history rows as a plain list — avoids spread/if/isLast issues
+    final pastVisits = history
+        .where((h) => h.entryId != currentEntryId)
+        .toList();
+
+    Widget buildHistoryRows() {
+      if (historyLoading) {
+        return const Center(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary),
+          ),
+        );
+      }
+      if (pastVisits.isEmpty) {
+        return const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: Text('No previous visits found.',
+            style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+        );
+      }
+      final rows = <Widget>[];
+      for (int i = 0; i < pastVisits.length; i++) {
+        final h  = pastVisits[i];
+        final sc = AppTheme.statusColor(h.status);
+        rows.add(Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppTheme.background,
+            borderRadius: AppTheme.r12,
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: sc.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(AppTheme.statusIcon(h.status), size: 16, color: sc),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Expanded(
+                    child: Text(
+                      fmt.format(h.visitDateTime.toLocal()),
+                      style: const TextStyle(fontSize: 12,
+                          fontWeight: FontWeight.w600, color: AppTheme.textPrimary),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: sc.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: sc.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(AppTheme.statusLabel(h.status),
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
+                          color: sc)),
+                  ),
+                ]),
+                const SizedBox(height: 3),
+                Text('${h.purpose}  ·  ${h.hostName}',
+                  style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                if (h.durationMinutes != null) ...[
+                  const SizedBox(height: 2),
+                  Text('Duration: ${h.durationMinutes} min',
+                    style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                ],
+              ]),
+            ),
+          ]),
+        ));
+        if (i < pastVisits.length - 1) rows.add(const SizedBox(height: 8));
+      }
+      return Column(children: rows);
+    }
+
+    final historySection = (historyLoading || history.isNotEmpty)
+        ? AppCard(
+            padding: EdgeInsets.all(r.cardPadding),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const Icon(Icons.history_rounded, size: 16, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Visit History', style: TextStyle(fontSize: 14,
+                      fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                ),
+                if (pastVisits.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      gradient: AppTheme.brandGrad,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${pastVisits.length} past visit${pastVisits.length == 1 ? "" : "s"}',
+                      style: const TextStyle(fontSize: 11, color: Colors.white,
+                          fontWeight: FontWeight.w700)),
+                  ),
+              ]),
+              const SizedBox(height: 12),
+              buildHistoryRows(),
+            ]),
+          )
+        : null;
+
     final content = r.isWide
         ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             SizedBox(width: r.isDesktop ? 320 : 280, child: hero),
@@ -328,11 +466,13 @@ class _Body extends StatelessWidget {
             Expanded(child: Column(children: [
               details,
               if (timeline != null) ...[SizedBox(height: r.itemGap), timeline],
+              if (historySection != null) ...[SizedBox(height: r.itemGap), historySection],
             ])),
           ])
         : Column(children: [
             hero, SizedBox(height: r.itemGap), details,
             if (timeline != null) ...[SizedBox(height: r.itemGap), timeline],
+            if (historySection != null) ...[SizedBox(height: r.itemGap), historySection],
             const SizedBox(height: 80),
           ]);
 
@@ -359,7 +499,7 @@ class _HeroInfo extends StatelessWidget {
     return Column(crossAxisAlignment: align, children: [
       Container(width: 64, height: 64,
         decoration: BoxDecoration(
-          color: sc.withOpacity(0.1),
+          color: sc.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Center(child: Text(e.visitorName[0].toUpperCase(),
@@ -380,7 +520,7 @@ class _HeroInfo extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           decoration: BoxDecoration(
-            color: AppTheme.primary.withOpacity(0.07),
+            color: AppTheme.primary.withValues(alpha: 0.07),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -421,9 +561,9 @@ class _QrPanel extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: color.withOpacity(0.4), width: 2),
+            border: Border.all(color: color.withValues(alpha: 0.4), width: 2),
             boxShadow: [BoxShadow(
-              color: color.withOpacity(0.12),
+              color: color.withValues(alpha: 0.12),
               blurRadius: 12, offset: const Offset(0, 4),
             )],
           ),
@@ -445,7 +585,7 @@ class _QrPanel extends StatelessWidget {
                         margin: const EdgeInsets.all(4),
                         padding: const EdgeInsets.all(3),
                         decoration: BoxDecoration(
-                          color: color.withOpacity(0.15),
+                          color: color.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Icon(Icons.fullscreen_rounded, size: 14, color: color),
